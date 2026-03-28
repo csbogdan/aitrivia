@@ -10,6 +10,12 @@ AI-powered IRC trivia bot. Generates questions on any topic using Anthropic Clau
 - All per-channel settings persist across restarts (topic, difficulty, language, permissions)
 - Question bank builds up to a configurable cap (default 10,000) — no AI needed once full
 - LRU rotation ensures different questions each round
+- Streak bonuses — consecutive correct answers earn +1 (×3) or +2 (×5) bonus points
+- Hint system — optional per-game; auto-hint at 50 % of timeout; answering after hint = 0 pts
+- Team mode — split players into named teams; winning team announced at end
+- Topic voting — 30-second poll before the game starts
+- Personal stats — `!mystats` shows rank, all-time points, correct answers, favourite topic
+- `!help [command]` — detailed per-command help, always delivered via PM
 - Fuzzy answer matching — accepts minor typos (Levenshtein distance ≤ 1)
 - Rate-limited send queue — flood-safe on Undernet ircu
 - Hot-reload — edit source files without restarting the bot
@@ -104,31 +110,41 @@ npm run dev
 
 | Command | Description |
 |---------|-------------|
-| `!start` | Start a trivia game (requires permission) |
+| `!start` | Start a normal game |
+| `!start vote` | 30-second topic poll, then start |
+| `!start hints` | Enable hints for this game |
+| `!start teams <t1> <t2>` | Team game — players join with `!join <team>` |
+| `!start vote hints teams red blue` | Flags are fully composable |
+| `!stop` | Stop the current game |
+| `!skip` | Skip the current question (owner only) |
 | `!scores` | Show scores for the current game |
 | `!leaderboard` / `!lb` | Show all-time leaderboard |
+| `!mystats` | Your rank, all-time pts, correct answers, favourite topic |
+| `!vote <topic>` | Cast a vote during a `!start vote` poll |
+| `!join <team>` | Join a team during a team game |
+| `!hint` | Reveal one letter of the answer (hints mode only; answering after = 0 pts) |
+| `!teamscores` | Show live team scores |
 | `!topics` | List available topics |
-| `!settings` | Show current game settings |
-| `!ping` | Ping the bot |
+| `!settings` | Show current channel game settings |
+| `!ping` | Check if bot is alive |
 | `!uptime` | Show bot uptime |
 | `!version` | Show bot version |
-| `!about` / `!info` | Short description and command list |
-| `!help` | Full command list |
+| `!about` / `!info` | Brief bot description |
+| `!help` | Full command list — **always sent via PM** |
+| `!help <command>` | Detailed help for a specific command — **sent via PM** |
 
 ### Owner only (in-channel)
 
 | Command | Description |
 |---------|-------------|
-| `!stop` | Stop the current game |
-| `!skip` | Skip the current question |
 | `!topic <text>` | Change the topic (persisted) |
 | `!difficulty <easy\|medium\|hard>` | Change difficulty (persisted) |
 | `!language <lang>` | Change question language (persisted) |
-
-> `!topic`, `!difficulty`, and `!language` follow the same permission as `!start` — if `startperm` is set to `anyone`, these commands are open to all users too.
-| `!say <text>` | Make the bot say something |
+| `!say <text>` | Make the bot say something in the channel |
 | `!nick <newnick>` | Change the bot's nick |
 | `!quit [message]` | Disconnect from IRC |
+
+> `!topic`, `!difficulty`, and `!language` follow the same permission as `!start` — if `startperm` is `anyone`, these open up to all users too.
 
 ---
 
@@ -157,13 +173,33 @@ Send these directly to the bot's nick:
 
 ## Playing the game
 
-1. `!start` — bot fetches questions and begins the round
-2. The bot asks a question with a countdown: `Q1: What is the capital of France? (30s)`
-3. Type your answer directly in the channel (no prefix needed)
-4. First correct answer wins the point; bot announces and moves to the next question
-5. After all questions, final scores are shown
+1. `!start` (or with flags) — bot fetches questions and begins the round
+2. The bot asks a question: `Q1: What is the capital of France? (30s)`
+3. Type your answer directly in the channel — no prefix needed
+4. First correct answer wins the point; bot announces and moves on
+5. After all questions, final scores (and team winner if applicable) are shown
 
-Answers are matched case-insensitively. Minor typos (1 character off) are accepted. Each question also has alternate accepted spellings defined by the AI.
+Answers are matched case-insensitively. Minor typos (1 character off) are accepted. The AI also generates alternate spellings and abbreviations as accepted variants.
+
+### Streak bonuses
+
+Consecutive correct answers by the same nick earn bonus points:
+
+| Streak | Points awarded |
+|--------|---------------|
+| 1–2 | +1 (normal) |
+| 3–4 | +2 (+1 bonus) |
+| 5+  | +3 (+2 bonus) |
+
+Streak resets when another player answers correctly.
+
+### Hints
+
+Enable with `!start hints`. At 50 % of the timeout the bot automatically reveals one letter of the answer (`_ _ a _ _ _`). Type `!hint` to trigger it manually. If a hint was shown before the correct answer, the winner scores **0 points**.
+
+### Team mode
+
+`!start teams red blue` — players type `!join red` or `!join blue` to join. Team assignments persist between rounds. Individual scores and team totals are both tracked. `!teamscores` shows live totals mid-game.
 
 ---
 
