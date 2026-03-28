@@ -29,6 +29,7 @@ game:
     - Sports
   language: English
   start_permission: owner   # owner | anyone
+  question_cache_limit: 10000  # stop calling AI once DB reaches this many questions
 
 ai:
   provider: groq             # groq | anthropic
