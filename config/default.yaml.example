@@ -1,0 +1,38 @@
+irc:
+  host: irc.undernet.org
+  port: 6667
+  nick: aitriviabot
+  username: aitrivia
+  realname: AI Trivia Bot
+  # Undernet X bot Login on Connect (optional)
+  loc:
+    enabled: false
+    username: ""
+    password: ""  # prefer IRC_LOC_PASSWORD env var
+
+bot:
+  command_prefix: "!"
+  default_channels:
+    - "#yourchannel"
+  owners:
+    - nick: "YourNick"
+      hostmask: "*.yourisp.net"  # use * wildcards; set exact mask for security
+
+game:
+  questions_per_round: 10
+  question_timeout_seconds: 30
+  difficulty: medium   # easy | medium | hard
+  topics:
+    - General Knowledge
+    - Science
+    - History
+    - Sports
+  language: English
+  start_permission: owner   # owner | anyone
+
+ai:
+  provider: groq             # groq | anthropic
+  model: ""                  # leave blank to use provider default
+
+database:
+  path: ./data/scores.db
