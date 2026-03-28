@@ -110,8 +110,6 @@
 | IRC-04 | Phase 1 | Pending |
 | IRC-05 | Phase 1 | Pending |
 | IRC-06 | Phase 1 | Pending |
-| BOT-01 | Phase 1 | Pending |
-| BOT-02 | Phase 1 | Pending |
 | BOT-03 | Phase 1 | Pending |
 | BOT-04 | Phase 1 | Pending |
 | AUTH-01 | Phase 1 | Pending |
@@ -138,6 +136,8 @@
 | AI-06 | Phase 2 | Pending |
 | SCORE-02 | Phase 2 | Pending |
 | SCORE-03 | Phase 2 | Pending |
+| BOT-01 | Phase 3 | Pending |
+| BOT-02 | Phase 3 | Pending |
 | CONF-03 | Phase 3 | Pending |
 | CONF-04 | Phase 3 | Pending |
 | CONF-05 | Phase 3 | Pending |
@@ -149,4 +149,4 @@
 
 ---
 *Requirements defined: 2026-03-28*
-*Last updated: 2026-03-28 after initial definition*
+*Last updated: 2026-03-28 after roadmap creation (BOT-01, BOT-02 moved Phase 1 → Phase 3)*
