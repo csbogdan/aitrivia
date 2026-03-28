@@ -24,7 +24,7 @@ export function initDb(path) {
       question   TEXT NOT NULL,
       answer     TEXT NOT NULL,
       variants   TEXT NOT NULL,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      used_at    INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS scores (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,10 +55,8 @@ export function saveChannelSetting(channel, key, value) {
 
 // ─── Question cache ───────────────────────────────────────────────────────────
 
-const CACHE_LIMIT = 10000;
-
 export function pruneQuestionDuplicates() {
-  // Remove duplicate questions keeping the earliest id, then enforce unique index
+  // Remove dupes keeping the earliest id, then enforce unique index going forward
   const { changes } = db.prepare(`
     DELETE FROM question_cache
     WHERE id NOT IN (
@@ -68,33 +66,51 @@ export function pruneQuestionDuplicates() {
   `).run();
   if (changes) console.log(`[cache] pruned ${changes} duplicate question(s)`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_qcache_unique ON question_cache(topic, difficulty, language, lower(question))`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_qcache_lru ON question_cache(topic, difficulty, language, used_at)`);
 }
 
-export function getRecentQuestions(topic, difficulty, language, limit = 60) {
-  return db.prepare(`
-    SELECT question FROM question_cache
+// Returns how many questions are stored for this topic/difficulty/language
+export function countQuestions(topic, difficulty, language) {
+  return db.prepare(`SELECT COUNT(*) as n FROM question_cache WHERE topic=? AND difficulty=? AND language=?`)
+    .get(topic, difficulty, language).n;
+}
+
+// Returns how many questions are stored in total across all topics
+export function countAllQuestions() {
+  return db.prepare(`SELECT COUNT(*) as n FROM question_cache`).get().n;
+}
+
+// Fetch `limit` least-recently-used questions and mark them as used now
+export function fetchQuestions(topic, difficulty, language, limit) {
+  const rows = db.prepare(`
+    SELECT id, question, answer, variants FROM question_cache
     WHERE topic=? AND difficulty=? AND language=?
-    ORDER BY id DESC LIMIT ?
-  `).all(topic, difficulty, language, limit).map(r => r.question);
+    ORDER BY used_at ASC
+    LIMIT ?
+  `).all(topic, difficulty, language, limit);
+
+  if (rows.length) {
+    const ids = rows.map(r => r.id).join(',');
+    db.exec(`UPDATE question_cache SET used_at=${Date.now()} WHERE id IN (${ids})`);
+  }
+  return rows.map(r => ({ question: r.question, answer: r.answer, variants: JSON.parse(r.variants) }));
 }
 
-export function storeQuestions(topic, difficulty, language, questions) {
+// Store new questions; never prune — accumulate up to the configured cap
+export function storeQuestions(topic, difficulty, language, questions, cap) {
+  const total = countAllQuestions();
+  const room = Math.max(0, cap - total);
+  const toStore = questions.slice(0, room);
+  if (!toStore.length) return;
+
   const insert = db.prepare(`
     INSERT OR IGNORE INTO question_cache (topic, difficulty, language, question, answer, variants)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
-  const tx = db.transaction(qs => {
+  db.transaction(qs => {
     for (const q of qs) insert.run(topic, difficulty, language, q.question, q.answer, JSON.stringify(q.variants));
-  });
-  tx(questions);
-
-  // Prune oldest rows if over limit
-  const { n } = db.prepare('SELECT COUNT(*) as n FROM question_cache').get();
-  if (n > CACHE_LIMIT) {
-    const excess = n - CACHE_LIMIT;
-    db.prepare(`DELETE FROM question_cache WHERE id IN (SELECT id FROM question_cache ORDER BY id ASC LIMIT ?)`).run(excess);
-  }
-  console.log(`[cache] +${questions.length} questions (${topic}/${difficulty}/${language}), total=${Math.min(n, CACHE_LIMIT)}`);
+  })(toStore);
+  console.log(`[cache] +${toStore.length} questions (${topic}/${difficulty}/${language}), total=${total + toStore.length}/${cap}`);
 }
 
 export function addPoint(channel, nick) {

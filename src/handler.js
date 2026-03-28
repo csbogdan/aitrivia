@@ -107,7 +107,7 @@ async function generateBatch(topic, difficulty, language, count, asked = []) {
   }));
 }
 
-import { getRecentQuestions, storeQuestions } from './db.js';
+import { fetchQuestions, storeQuestions, countQuestions, countAllQuestions } from './db.js';
 
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -138,11 +138,20 @@ export async function startGame(channel) {
   s.asked = [];
   say(channel, `Starting trivia! Topic: ${s.topic} | Difficulty: ${s.difficulty} | Language: ${s.language} | ${QPR()} questions — fetching questions...`);
   try {
-    // Always generate fresh questions; pass recent DB entries so AI avoids repeats
-    const recent = getRecentQuestions(s.topic, s.difficulty, s.language, 60);
-    const fresh = await generateBatch(s.topic, s.difficulty, s.language, QPR(), recent);
-    storeQuestions(s.topic, s.difficulty, s.language, fresh);
-    s.queue = shuffle(fresh);
+    const cap = cfg().game?.question_cache_limit || 10000;
+    const stored = countQuestions(s.topic, s.difficulty, s.language);
+    const needed = QPR() - Math.min(stored, QPR());
+
+    // Generate only what we still need to fill up to the cap
+    if (needed > 0 && countAllQuestions() < cap) {
+      const existing = fetchQuestions(s.topic, s.difficulty, s.language, stored).map(q => q.question);
+      const fresh = await generateBatch(s.topic, s.difficulty, s.language, needed, existing);
+      storeQuestions(s.topic, s.difficulty, s.language, fresh, cap);
+    }
+
+    // Always play from DB — least-recently-used first
+    s.queue = shuffle(fetchQuestions(s.topic, s.difficulty, s.language, QPR()));
+    if (!s.queue.length) throw new Error('No questions available — try a different topic or wait for the cache to build.');
   } catch (err) {
     say(channel, `Failed to load questions: ${err.message}`);
     return;
