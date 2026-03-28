@@ -468,6 +468,37 @@ export async function handleMessage(client, channel, nick, host, text) {
       break;
 
     // ── Owner bot control (in-channel) ────────────────────────────────────────
+    case 'qgenerate': {
+      if (!owner) return;
+      const count = parseInt(args[0]);
+      if (!count || count < 1 || count > 500) { say(channel, `Usage: ${PREFIX()}qgenerate <count> (1–500)`); return; }
+      const s = getState(channel);
+      const cap = cfg().game?.question_cache_limit || 10000;
+      const room = cap - countAllQuestions();
+      if (room <= 0) { say(channel, `Question bank is full (${cap}/${cap}). Use !qclear to make room.`); return; }
+      const target = Math.min(count, room);
+      say(channel, `Generating ${target} question(s) — topic: ${s.topic} | ${s.difficulty} | ${s.language}${target < count ? ` (capped at ${room} available slots)` : ''}...`);
+      // Run async without blocking the channel
+      (async () => {
+        const BATCH = 10;
+        let done = 0;
+        while (done < target) {
+          const batchSize = Math.min(BATCH, target - done);
+          try {
+            const existing = fetchQuestions(s.topic, s.difficulty, s.language, 60).map(q => q.question);
+            const fresh = await generateBatch(s.topic, s.difficulty, s.language, batchSize, existing);
+            storeQuestions(s.topic, s.difficulty, s.language, fresh, cap);
+            done += fresh.length;
+            say(channel, `[${done}/${target}] generated — bank: ${countAllQuestions()}/${cap}`);
+          } catch (err) {
+            say(channel, `Error after ${done} question(s): ${err.message}`);
+            return;
+          }
+        }
+        say(channel, `Done! Bank now has ${countAllQuestions()}/${cap} question(s).`);
+      })();
+      break;
+    }
     case 'say':
       if (!owner) return;
       if (!args.length) { say(channel, `Usage: ${PREFIX()}say <text>`); return; }
