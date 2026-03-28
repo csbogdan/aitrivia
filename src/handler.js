@@ -76,8 +76,10 @@ async function generateBatch(topic, difficulty, language, count, asked = []) {
     hard:   'challenging, requires specific knowledge',
   };
 
-  const avoidBlock = asked.length
-    ? `\nDo NOT use any of these questions:\n${asked.map(q => `- ${q}`).join('\n')}\n`
+  // Cap avoid list to keep prompt short enough that the full JSON response fits in maxTokens
+  const avoidList = asked.slice(-20);
+  const avoidBlock = avoidList.length
+    ? `\nDo NOT use any of these questions:\n${avoidList.map(q => `- ${q}`).join('\n')}\n`
     : '';
 
   const prompt =
@@ -95,7 +97,7 @@ async function generateBatch(topic, difficulty, language, count, asked = []) {
     `- Include 2-4 variants per question\n` +
     `- each question has exactly one correct answer`;
 
-  const raw = await complete(prompt, 1500);
+  const raw = await complete(prompt, 2500);
   console.log(`[ai] batch raw: ${raw.slice(0, 400)}`);
 
   const match = raw.match(/\[[\s\S]*\]/);
@@ -407,7 +409,7 @@ export async function handleMessage(client, channel, nick, host, text) {
       break;
     case 'hint': {
       const s = getState(channel);
-      if (s.status !== 'asking' || !s.hintsEnabled) return;
+      if (s.status !== 'asking') return;
       if (s.hintTimer) { clearTimeout(s.hintTimer); s.hintTimer = null; }
       showHint(channel);
       break;
