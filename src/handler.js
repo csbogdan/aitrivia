@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import Groq from 'groq-sdk';
 import { getState, getAllChannels } from './state.js';
 import { addPoints, getLeaderboard, saveChannelSetting, recordAnswer, getNickStats,
-         fetchQuestions, storeQuestions, countQuestions, countAllQuestions,
+         fetchQuestions, storeQuestions, countQuestions, countAllQuestions, markQuestionUsed,
          countQuestionDuplicates, pruneQuestionDuplicates, listQuestionCounts, clearQuestions } from './db.js';
 import { say } from './sendQueue.js';
 import { cfg } from './cfg.js';
@@ -616,6 +616,7 @@ async function nextQuestion(channel) {
   s.answer   = q.answer;
   s.variants = q.variants;
   s.asked.push(q.question);
+  markQuestionUsed(q.id);
   console.log(`[game] ${channel} Q${s.questionNum + 1}: "${q.question}" A: "${q.answer}"`);
   say(channel, `Q${s.questionNum + 1}: ${q.question} (${TIMEOUT_MS() / 1000}s)`);
 

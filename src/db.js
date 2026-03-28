@@ -112,20 +112,20 @@ export function countAllQuestions() {
   return db.prepare(`SELECT COUNT(*) as n FROM question_cache`).get().n;
 }
 
-// Fetch `limit` least-recently-used questions and mark them as used now
+// Fetch `limit` least-recently-used questions — does NOT mark them as used
 export function fetchQuestions(topic, difficulty, language, limit) {
-  const rows = db.prepare(`
+  return db.prepare(`
     SELECT id, question, answer, variants FROM question_cache
     WHERE topic=? AND difficulty=? AND language=?
     ORDER BY used_at ASC
     LIMIT ?
-  `).all(topic, difficulty, language, limit);
+  `).all(topic, difficulty, language, limit)
+    .map(r => ({ id: r.id, question: r.question, answer: r.answer, variants: JSON.parse(r.variants) }));
+}
 
-  if (rows.length) {
-    const ids = rows.map(r => r.id).join(',');
-    db.exec(`UPDATE question_cache SET used_at=${Date.now()} WHERE id IN (${ids})`);
-  }
-  return rows.map(r => ({ question: r.question, answer: r.answer, variants: JSON.parse(r.variants) }));
+// Mark a question as used right now — called when actually shown to players
+export function markQuestionUsed(id) {
+  db.prepare(`UPDATE question_cache SET used_at=? WHERE id=?`).run(Date.now(), id);
 }
 
 // Store new questions; never prune — accumulate up to the configured cap
