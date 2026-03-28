@@ -1,7 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import Groq from 'groq-sdk';
 import { getState, getAllChannels } from './state.js';
-import { addPoint, getLeaderboard, saveChannelSetting } from './db.js';
+import { addPoints, getLeaderboard, saveChannelSetting, recordAnswer, getNickStats,
+         fetchQuestions, storeQuestions, countQuestions, countAllQuestions,
+         countQuestionDuplicates, pruneQuestionDuplicates, listQuestionCounts, clearQuestions } from './db.js';
 import { say } from './sendQueue.js';
 import { cfg } from './cfg.js';
 
@@ -107,8 +109,6 @@ async function generateBatch(topic, difficulty, language, count, asked = []) {
   }));
 }
 
-import { fetchQuestions, storeQuestions, countQuestions, countAllQuestions, countQuestionDuplicates, pruneQuestionDuplicates, listQuestionCounts, clearQuestions } from './db.js';
-
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -121,35 +121,56 @@ function shuffle(arr) {
 
 export function resetState(channel) {
   const s = getState(channel);
-  if (s.timer) clearTimeout(s.timer);
-  Object.assign(s, { status: 'idle', question: null, variants: [], answer: null, questionNum: 0, timer: null, scores: {}, asked: [], queue: [] });
+  if (s.timer)      clearTimeout(s.timer);
+  if (s.hintTimer)  clearTimeout(s.hintTimer);
+  if (s.voteTimer)  clearTimeout(s.voteTimer);
+  Object.assign(s, {
+    status: 'idle', question: null, variants: [], answer: null,
+    questionNum: 0, timer: null, scores: {}, asked: [], queue: [],
+    streaks: {}, hintsEnabled: false, hintUsed: false, hintTimer: null, hintRevealed: [],
+    voteTimer: null, votes: {},
+    teamsEnabled: false, teamNames: [], teams: {}, teamScores: {},
+  });
 }
 
 export function resetAll() {
   for (const ch of getAllChannels()) resetState(ch);
 }
 
-export async function startGame(channel) {
+export async function startGame(channel, opts = {}) {
   const s = getState(channel);
   if (s.status !== 'idle') { say(channel, 'A game is already running. Use !stop to end it.'); return; }
-  s.scores = {};
-  s.questionNum = 0;
-  s.queue = [];
-  s.asked = [];
-  say(channel, `Starting trivia! Topic: ${s.topic} | Difficulty: ${s.difficulty} | Language: ${s.language} | ${QPR()} questions — fetching questions...`);
+
+  // Apply per-game options
+  s.scores = {}; s.questionNum = 0; s.queue = []; s.asked = []; s.streaks = {};
+  s.hintsEnabled = opts.hints || false;
+  s.hintUsed = false; s.hintTimer = null; s.hintRevealed = [];
+  if (opts.teams) {
+    s.teamsEnabled = true;
+    s.teamNames = opts.teamNames;
+    s.teamScores = Object.fromEntries(opts.teamNames.map(t => [t, 0]));
+    // preserve s.teams (player assignments from prior round)
+  } else {
+    s.teamsEnabled = false; s.teamNames = []; s.teams = {}; s.teamScores = {};
+  }
+
+  const modeFlags = [
+    s.hintsEnabled ? 'hints on' : null,
+    s.teamsEnabled ? `teams: ${s.teamNames.join(' vs ')}` : null,
+  ].filter(Boolean).join(', ');
+
+  say(channel, `Starting trivia! Topic: ${s.topic} | Difficulty: ${s.difficulty} | Language: ${s.language} | ${QPR()} questions${modeFlags ? ` | ${modeFlags}` : ''} — fetching...`);
+  if (s.teamsEnabled) say(channel, `Join a team: ${s.teamNames.map(t => `${PREFIX()}join ${t}`).join('  or  ')}`);
+
   try {
     const cap = cfg().game?.question_cache_limit || 10000;
     const stored = countQuestions(s.topic, s.difficulty, s.language);
     const needed = QPR() - Math.min(stored, QPR());
-
-    // Generate only what we still need to fill up to the cap
     if (needed > 0 && countAllQuestions() < cap) {
       const existing = fetchQuestions(s.topic, s.difficulty, s.language, stored).map(q => q.question);
       const fresh = await generateBatch(s.topic, s.difficulty, s.language, needed, existing);
       storeQuestions(s.topic, s.difficulty, s.language, fresh, cap);
     }
-
-    // Always play from DB — least-recently-used first
     s.queue = shuffle(fetchQuestions(s.topic, s.difficulty, s.language, QPR()));
     if (!s.queue.length) throw new Error('No questions available — try a different topic or wait for the cache to build.');
   } catch (err) {
@@ -159,10 +180,45 @@ export async function startGame(channel) {
   await nextQuestion(channel);
 }
 
+async function startVoting(channel, opts) {
+  const s = getState(channel);
+  if (s.status !== 'idle') { say(channel, 'A game is already running.'); return; }
+  const topics = cfg().game?.topics || [];
+  if (topics.length < 2) { await startGame(channel, opts); return; }
+  s.status = 'voting';
+  s.votes = {};
+  s.voteTimer = setTimeout(() => tallyVotes(channel, opts), 30000);
+  say(channel, `Vote for a topic! Type ${PREFIX()}vote <topic>  |  Options: ${topics.join('  |  ')}  (30s)`);
+}
+
+async function tallyVotes(channel, opts) {
+  const s = getState(channel);
+  if (s.status !== 'voting') return;
+  s.voteTimer = null;
+  const topics = cfg().game?.topics || [];
+  let winner;
+  if (!Object.keys(s.votes).length) {
+    winner = topics[Math.floor(Math.random() * topics.length)];
+    say(channel, `No votes — randomly picked: ${winner}`);
+  } else {
+    const counts = {};
+    for (const t of Object.values(s.votes)) counts[t] = (counts[t] || 0) + 1;
+    const max = Math.max(...Object.values(counts));
+    const tied = Object.keys(counts).filter(t => counts[t] === max);
+    winner = tied[Math.floor(Math.random() * tied.length)];
+    say(channel, `Voting done! Winner: ${winner} (${counts[winner]} vote(s))`);
+  }
+  s.status = 'idle';
+  s.topic = winner;
+  await startGame(channel, opts);
+}
+
 export function stopGame(channel) {
   const s = getState(channel);
   if (s.status === 'idle') { say(channel, 'No game is running.'); return; }
-  if (s.timer) clearTimeout(s.timer);
+  if (s.timer)     clearTimeout(s.timer);
+  if (s.hintTimer) clearTimeout(s.hintTimer);
+  if (s.voteTimer) clearTimeout(s.voteTimer);
   s.status = 'idle';
   say(channel, `Game stopped. ${formatScores(s.scores)}`);
 }
@@ -170,7 +226,8 @@ export function stopGame(channel) {
 export async function skipQuestion(channel) {
   const s = getState(channel);
   if (s.status === 'idle') return;
-  if (s.timer) clearTimeout(s.timer);
+  if (s.timer)     clearTimeout(s.timer);
+  if (s.hintTimer) { clearTimeout(s.hintTimer); s.hintTimer = null; }
   say(channel, `Skipping! The answer was: ${s.answer}`);
   s.questionNum++;
   s.questionNum >= QPR() ? await endGame(channel) : await nextQuestion(channel);
@@ -185,11 +242,31 @@ export async function handleAnswer(channel, nick, text) {
   if (!accepted.includes(guess) && !fuzzyMatch(guess, accepted)) return;
 
   s.status = 'judging';
-  if (s.timer) clearTimeout(s.timer);
-  s.scores[nick] = (s.scores[nick] || 0) + 1;
-  addPoint(channel, nick);
-  console.log(`[game] ${channel} correct: ${nick} answered "${guess}" (answer: "${s.answer}")`);
-  say(channel, `Correct! ${nick} got it! The answer was: ${s.answer} (+1 point)`);
+  if (s.timer)     clearTimeout(s.timer);
+  if (s.hintTimer) { clearTimeout(s.hintTimer); s.hintTimer = null; }
+
+  // Streaks — reset all others, increment winner
+  for (const n of Object.keys(s.streaks)) if (n !== nick) s.streaks[n] = 0;
+  s.streaks[nick] = (s.streaks[nick] || 0) + 1;
+  const streak = s.streaks[nick];
+  const streakBonus = streak >= 5 ? 2 : streak >= 3 ? 1 : 0;
+  const pts = s.hintUsed ? 0 : 1 + streakBonus;
+
+  s.scores[nick] = (s.scores[nick] || 0) + pts;
+  if (pts > 0) addPoints(channel, nick, pts);
+  recordAnswer(channel, nick, s.topic);
+
+  if (s.teamsEnabled && s.teams[nick])
+    s.teamScores[s.teams[nick]] = (s.teamScores[s.teams[nick]] || 0) + pts;
+
+  let msg = `Correct! ${nick} got it! The answer was: ${s.answer}`;
+  if (s.hintUsed)        msg += ' (no point — hint was used)';
+  else if (streakBonus)  msg += ` (+${pts} pts — ${streak}x streak!)`;
+  else                   msg += ' (+1 point)';
+  if (s.teamsEnabled && s.teams[nick]) msg += `  [Team ${s.teams[nick]}: ${s.teamScores[s.teams[nick]]}]`;
+  console.log(`[game] ${channel} correct: ${nick} streak=${streak} pts=${pts} answer="${s.answer}"`);
+  say(channel, msg);
+
   s.questionNum++;
   s.questionNum >= QPR() ? await endGame(channel) : await nextQuestion(channel);
 }
@@ -232,10 +309,15 @@ export async function handleMessage(client, channel, nick, host, text) {
 
   switch (cmd.toLowerCase()) {
     // ── Game ──────────────────────────────────────────────────────────────────
-    case 'start':
+    case 'start': {
       if (getStartPerm(channel) === 'owner' && !owner) return;
-      await startGame(channel);
+      const flags = args.map(a => a.toLowerCase());
+      const teamsIdx = flags.indexOf('teams');
+      const teamNames = teamsIdx >= 0 ? args.slice(teamsIdx + 1, teamsIdx + 3) : [];
+      const opts = { hints: flags.includes('hints'), teams: teamNames.length === 2, teamNames };
+      flags.includes('vote') ? await startVoting(channel, opts) : await startGame(channel, opts);
       break;
+    }
     case 'stop':
       if (getStopPerm(channel) === 'owner' && !owner) return;
       stopGame(channel);
@@ -261,6 +343,44 @@ export async function handleMessage(client, channel, nick, host, text) {
       if (!args.length) { say(channel, `Usage: ${PREFIX()}language <English|French|...>`); return; }
       setLanguage(channel, args.join(' '));
       break;
+    case 'hint': {
+      const s = getState(channel);
+      if (s.status !== 'asking' || !s.hintsEnabled) return;
+      if (s.hintTimer) { clearTimeout(s.hintTimer); s.hintTimer = null; }
+      showHint(channel);
+      break;
+    }
+    case 'vote': {
+      const s = getState(channel);
+      if (s.status !== 'voting') return;
+      if (!args.length) return;
+      const choice = args.join(' ');
+      const match = (cfg().game?.topics || []).find(t => t.toLowerCase() === choice.toLowerCase());
+      if (!match) { say(channel, `Options: ${(cfg().game?.topics || []).join('  |  ')}`); return; }
+      s.votes[nick] = match;
+      break;
+    }
+    case 'join': {
+      const s = getState(channel);
+      if (!s.teamsEnabled) return;
+      const match = s.teamNames.find(t => t.toLowerCase() === (args[0] || '').toLowerCase());
+      if (!match) { say(channel, `Teams: ${s.teamNames.join(', ')}`); return; }
+      s.teams[nick] = match;
+      say(channel, `${nick} joined team ${match}!`);
+      break;
+    }
+    case 'mystats': {
+      const stats = getNickStats(channel, nick);
+      if (!stats) { say(channel, `${nick}: no stats yet.`); return; }
+      say(channel, `${nick} — rank: #${stats.rank}  all-time: ${stats.points} pts  correct answers: ${stats.totalCorrect}  fav topic: ${stats.favTopic || 'N/A'}`);
+      break;
+    }
+    case 'teamscores': {
+      const s = getState(channel);
+      if (!s.teamsEnabled) { say(channel, 'No team game running.'); return; }
+      say(channel, `Teams: ${s.teamNames.map(t => `${t}: ${s.teamScores[t] || 0}`).join('  |  ')}`);
+      break;
+    }
     case 'topics': {
       const list = (cfg().game?.topics || []).join('  |  ');
       say(channel, `Available topics: ${list || '(none configured)'}`);
@@ -305,8 +425,8 @@ export async function handleMessage(client, channel, nick, host, text) {
 
     // ── Help ──────────────────────────────────────────────────────────────────
     case 'help':
-      say(channel, `${PREFIX()}start  ${PREFIX()}stop  ${PREFIX()}skip  ${PREFIX()}scores  ${PREFIX()}lb  ${PREFIX()}topics  ${PREFIX()}settings  ${PREFIX()}ping  ${PREFIX()}uptime  ${PREFIX()}version  ${PREFIX()}about` +
-        (owner ? `  [owner: ${PREFIX()}topic  ${PREFIX()}diff  ${PREFIX()}lang  ${PREFIX()}say  ${PREFIX()}nick  ${PREFIX()}quit  DM: ${PREFIX()}join  ${PREFIX()}part  ${PREFIX()}channels  ${PREFIX()}status]` : ''));
+      say(channel, `${PREFIX()}start [vote] [hints] [teams t1 t2]  ${PREFIX()}stop  ${PREFIX()}skip  ${PREFIX()}scores  ${PREFIX()}lb  ${PREFIX()}mystats  ${PREFIX()}vote <topic>  ${PREFIX()}join <team>  ${PREFIX()}hint  ${PREFIX()}teamscores  ${PREFIX()}topics  ${PREFIX()}settings  ${PREFIX()}ping  ${PREFIX()}uptime  ${PREFIX()}about` +
+        (owner ? `  [owner: ${PREFIX()}topic  ${PREFIX()}diff  ${PREFIX()}lang  ${PREFIX()}say  ${PREFIX()}nick  ${PREFIX()}quit]` : ''));
       break;
   }
 }
@@ -427,6 +547,8 @@ export function handleOwnerPrivmsg(client, nick, host, text) {
 async function nextQuestion(channel) {
   const s = getState(channel);
   s.status = 'asking';
+  s.hintUsed = false;
+  s.hintRevealed = [];
 
   const q = s.queue.shift();
   if (!q) { await endGame(channel); return; }
@@ -438,18 +560,44 @@ async function nextQuestion(channel) {
   console.log(`[game] ${channel} Q${s.questionNum + 1}: "${q.question}" A: "${q.answer}"`);
   say(channel, `Q${s.questionNum + 1}: ${q.question} (${TIMEOUT_MS() / 1000}s)`);
 
+  if (s.hintsEnabled)
+    s.hintTimer = setTimeout(() => showHint(channel), TIMEOUT_MS() / 2);
+
   s.timer = setTimeout(async () => {
     if (s.status !== 'asking') return;
+    if (s.hintTimer) { clearTimeout(s.hintTimer); s.hintTimer = null; }
     say(channel, `Time's up! The answer was: ${s.answer}`);
     s.questionNum++;
     s.questionNum >= QPR() ? await endGame(channel) : await nextQuestion(channel);
   }, TIMEOUT_MS());
 }
 
+function showHint(channel) {
+  const s = getState(channel);
+  if (s.status !== 'asking') return;
+  s.hintUsed = true;
+  // Reveal one random unrevealed non-space character
+  const unrevealed = s.answer.split('').reduce((a, ch, i) => {
+    if (ch !== ' ' && !s.hintRevealed.includes(i)) a.push(i);
+    return a;
+  }, []);
+  if (unrevealed.length) s.hintRevealed.push(unrevealed[Math.floor(Math.random() * unrevealed.length)]);
+  const hint = s.answer.split('').map((ch, i) => ch === ' ' ? '  ' : (s.hintRevealed.includes(i) ? ch : '_')).join(' ');
+  say(channel, `Hint: ${hint}  (answering now scores 0 pts)`);
+}
+
 async function endGame(channel) {
   const s = getState(channel);
   s.status = 'idle';
-  say(channel, `Game over! Final scores: ${formatScores(s.scores) || 'No points scored'}`);
+  let msg = `Game over! Final scores: ${formatScores(s.scores) || 'No points scored'}`;
+  if (s.teamsEnabled && s.teamNames.length) {
+    const teamTally = s.teamNames.map(t => `${t}: ${s.teamScores[t] || 0}`).join('  |  ');
+    const max = Math.max(...s.teamNames.map(t => s.teamScores[t] || 0));
+    const winners = s.teamNames.filter(t => (s.teamScores[t] || 0) === max);
+    const teamResult = winners.length === 1 ? `Winner: Team ${winners[0]}!` : `Tie: ${winners.join(' & ')}!`;
+    msg += `  ||  Teams — ${teamTally}  |  ${teamResult}`;
+  }
+  say(channel, msg);
 }
 
 function formatScores(scores) {

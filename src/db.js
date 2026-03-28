@@ -35,6 +35,14 @@ export function initDb(path) {
       UNIQUE(channel, nick)
     );
     CREATE INDEX IF NOT EXISTS idx_scores_channel ON scores(channel, score DESC);
+    CREATE TABLE IF NOT EXISTS answers (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel TEXT NOT NULL,
+      nick    TEXT NOT NULL,
+      topic   TEXT NOT NULL,
+      ts      INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_answers ON answers(channel, nick);
   `);
   return db;
 }
@@ -137,14 +145,27 @@ export function storeQuestions(topic, difficulty, language, questions, cap) {
   console.log(`[cache] +${toStore.length} questions (${topic}/${difficulty}/${language}), total=${total + toStore.length}/${cap}`);
 }
 
-export function addPoint(channel, nick) {
+export function addPoints(channel, nick, n) {
   db.prepare(`
     INSERT INTO scores (channel, nick, score, updated_at)
-    VALUES (?, ?, 1, unixepoch())
+    VALUES (?, ?, ?, unixepoch())
     ON CONFLICT(channel, nick) DO UPDATE SET
-      score = score + 1,
+      score = score + excluded.score,
       updated_at = unixepoch()
-  `).run(channel, nick);
+  `).run(channel, nick, n);
+}
+
+export function recordAnswer(channel, nick, topic) {
+  db.prepare(`INSERT INTO answers (channel, nick, topic) VALUES (?, ?, ?)`).run(channel, nick, topic);
+}
+
+export function getNickStats(channel, nick) {
+  const scoreRow = db.prepare(`SELECT score FROM scores WHERE channel=? AND nick=?`).get(channel, nick);
+  if (!scoreRow) return null;
+  const rank = db.prepare(`SELECT COUNT(*) as n FROM scores WHERE channel=? AND score > ?`).get(channel, scoreRow.score).n + 1;
+  const totalCorrect = db.prepare(`SELECT COUNT(*) as n FROM answers WHERE channel=? AND nick=?`).get(channel, nick).n;
+  const favRow = db.prepare(`SELECT topic, COUNT(*) as n FROM answers WHERE channel=? AND nick=? GROUP BY topic ORDER BY n DESC LIMIT 1`).get(channel, nick);
+  return { points: scoreRow.score, rank, totalCorrect, favTopic: favRow?.topic || null };
 }
 
 export function getSessionScores(channel, nicks) {
