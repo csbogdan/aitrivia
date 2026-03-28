@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import Groq from 'groq-sdk';
 import { getState, getAllChannels } from './state.js';
-import { addPoint, getLeaderboard } from './db.js';
+import { addPoint, getLeaderboard, saveChannelSetting } from './db.js';
 import { say } from './sendQueue.js';
 import { cfg } from './cfg.js';
 
@@ -39,7 +39,8 @@ async function complete(prompt, maxTokens) {
 
 function owners()    { return cfg().bot?.owners || []; }
 function PREFIX()    { return cfg().bot?.command_prefix || '!'; }
-function START_PERM(){ return cfg().game?.start_permission || 'owner'; }
+function getStartPerm(channel){ return getState(channel).startPerm ?? cfg().game?.start_permission ?? 'owner'; }
+function getStopPerm(channel) { return getState(channel).stopPerm  ?? 'owner'; }
 function TIMEOUT_MS(){ return (cfg().game?.question_timeout_seconds || 30) * 1000; }
 function QPR()       { return cfg().game?.questions_per_round || 10; }
 
@@ -226,7 +227,9 @@ export async function handleAnswer(channel, nick, text) {
   const s = getState(channel);
   if (s.status !== 'asking') return;
   const guess = text.toLowerCase().trim();
-  if (!s.variants.includes(guess) && !fuzzyMatch(guess, s.variants)) return;
+  const canonical = s.answer.toLowerCase().trim();
+  const accepted = [canonical, ...s.variants];
+  if (!accepted.includes(guess) && !fuzzyMatch(guess, accepted)) return;
 
   s.status = 'judging';
   if (s.timer) clearTimeout(s.timer);
@@ -250,11 +253,20 @@ export function showLeaderboard(channel) {
   say(channel, `All-time: ${rows.map((r, i) => `${i + 1}. ${r.nick} (${r.score})`).join('  ')}`);
 }
 
-export function setTopic(channel, topic)      { getState(channel).topic = topic;           say(channel, `Topic set to: ${topic}`); }
-export function setLanguage(channel, language) { getState(channel).language = language;    say(channel, `Language set to: ${language}`); }
+export function setTopic(channel, topic) {
+  getState(channel).topic = topic;
+  saveChannelSetting(channel, 'topic', topic);
+  say(channel, `Topic set to: ${topic}`);
+}
+export function setLanguage(channel, language) {
+  getState(channel).language = language;
+  saveChannelSetting(channel, 'language', language);
+  say(channel, `Language set to: ${language}`);
+}
 export function setDifficulty(channel, diff) {
   if (!['easy','medium','hard'].includes(diff)) { say(channel, 'Choose: easy, medium, hard'); return; }
   getState(channel).difficulty = diff;
+  saveChannelSetting(channel, 'difficulty', diff);
   say(channel, `Difficulty set to: ${diff}`);
 }
 
@@ -268,10 +280,13 @@ export async function handleMessage(client, channel, nick, host, text) {
   switch (cmd.toLowerCase()) {
     // ── Game ──────────────────────────────────────────────────────────────────
     case 'start':
-      if (START_PERM() === 'owner' && !owner) return;
+      if (getStartPerm(channel) === 'owner' && !owner) return;
       await startGame(channel);
       break;
-    case 'stop':       if (!owner) return; stopGame(channel); break;
+    case 'stop':
+      if (getStopPerm(channel) === 'owner' && !owner) return;
+      stopGame(channel);
+      break;
     case 'skip':       if (!owner) return; await skipQuestion(channel); break;
     case 'scores':     showScores(channel); break;
     case 'leaderboard':
@@ -376,6 +391,26 @@ export function handleOwnerPrivmsg(client, nick, host, text) {
       client.say(nick, `Active channels: ${chs || '(none)'}`);
       break;
     }
+    case 'startperm': {
+      // !startperm <#channel> <owner|anyone>
+      const [ch, perm] = args;
+      if (!ch || !perm) { client.say(nick, `Usage: ${PREFIX()}startperm <#channel> <owner|anyone>`); return; }
+      if (!['owner', 'anyone'].includes(perm)) { client.say(nick, 'Permission must be "owner" or "anyone"'); return; }
+      getState(ch).startPerm = perm;
+      saveChannelSetting(ch, 'startPerm', perm);
+      client.say(nick, `${ch}: start permission set to "${perm}"`);
+      break;
+    }
+    case 'stopperm': {
+      // !stopperm <#channel> <owner|anyone>
+      const [ch, perm] = args;
+      if (!ch || !perm) { client.say(nick, `Usage: ${PREFIX()}stopperm <#channel> <owner|anyone>`); return; }
+      if (!['owner', 'anyone'].includes(perm)) { client.say(nick, 'Permission must be "owner" or "anyone"'); return; }
+      getState(ch).stopPerm = perm;
+      saveChannelSetting(ch, 'stopPerm', perm);
+      client.say(nick, `${ch}: stop permission set to "${perm}"`);
+      break;
+    }
     case 'status': {
       const chs = [...getAllChannels()];
       const games = chs.map(ch => {
@@ -386,7 +421,7 @@ export function handleOwnerPrivmsg(client, nick, host, text) {
       break;
     }
     case 'help':
-      client.say(nick, `Owner DM commands: ${PREFIX()}join <#ch>  ${PREFIX()}part <#ch>  ${PREFIX()}say <#ch> <text>  ${PREFIX()}nick <newnick>  ${PREFIX()}quit [msg]  ${PREFIX()}channels  ${PREFIX()}status`);
+      client.say(nick, `Owner DM commands: ${PREFIX()}join <#ch>  ${PREFIX()}part <#ch>  ${PREFIX()}say <#ch> <text>  ${PREFIX()}nick <newnick>  ${PREFIX()}quit [msg]  ${PREFIX()}channels  ${PREFIX()}status  ${PREFIX()}startperm <#ch> <owner|anyone>  ${PREFIX()}stopperm <#ch> <owner|anyone>`);
       break;
   }
 }

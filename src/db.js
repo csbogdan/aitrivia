@@ -10,6 +10,12 @@ export function initDb(path) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(`
+    CREATE TABLE IF NOT EXISTS channel_settings (
+      channel TEXT NOT NULL,
+      key     TEXT NOT NULL,
+      value   TEXT NOT NULL,
+      PRIMARY KEY (channel, key)
+    );
     CREATE TABLE IF NOT EXISTS scores (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       channel TEXT NOT NULL,
@@ -24,6 +30,18 @@ export function initDb(path) {
 }
 
 export function getDb() { return db; }
+
+export function loadChannelSettings(channel) {
+  const rows = db.prepare('SELECT key, value FROM channel_settings WHERE channel = ?').all(channel);
+  return Object.fromEntries(rows.map(r => [r.key, r.value]));
+}
+
+export function saveChannelSetting(channel, key, value) {
+  db.prepare(`
+    INSERT INTO channel_settings (channel, key, value) VALUES (?, ?, ?)
+    ON CONFLICT(channel, key) DO UPDATE SET value = excluded.value
+  `).run(channel, key, String(value));
+}
 
 export function addPoint(channel, nick) {
   db.prepare(`

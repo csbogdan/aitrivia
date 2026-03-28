@@ -7,6 +7,7 @@ AI-powered IRC trivia bot. Generates questions on any topic using Anthropic Clau
 - Questions generated live by AI (Claude or Groq) — any topic, difficulty, language
 - Question cache in SQLite — reuses previously generated questions to save API calls
 - Per-channel game state — run simultaneous games in multiple channels
+- All per-channel settings persist across restarts (topic, difficulty, language, permissions)
 - Fuzzy answer matching — accepts minor typos (Levenshtein distance ≤ 1)
 - Rate-limited send queue — flood-safe on Undernet ircu
 - Hot-reload — edit source files without restarting the bot
@@ -117,9 +118,9 @@ npm run dev
 |---------|-------------|
 | `!stop` | Stop the current game |
 | `!skip` | Skip the current question |
-| `!topic <text>` | Change the topic |
-| `!difficulty <easy\|medium\|hard>` | Change difficulty |
-| `!language <lang>` | Change question language |
+| `!topic <text>` | Change the topic (persisted) |
+| `!difficulty <easy\|medium\|hard>` | Change difficulty (persisted) |
+| `!language <lang>` | Change question language (persisted) |
 | `!say <text>` | Make the bot say something |
 | `!nick <newnick>` | Change the bot's nick |
 | `!quit [message]` | Disconnect from IRC |
@@ -139,6 +140,8 @@ Send these directly to the bot's nick:
 | `!quit [message]` | Disconnect from IRC |
 | `!channels` | List channels the bot is active in |
 | `!status` | Uptime + per-channel game state |
+| `!startperm <#channel> <owner\|anyone>` | Set who can `!start` in a channel (persisted) |
+| `!stopperm <#channel> <owner\|anyone>` | Set who can `!stop` in a channel (persisted) |
 | `!help` | List all PM commands |
 
 ---
