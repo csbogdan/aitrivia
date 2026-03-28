@@ -300,6 +300,66 @@ export function setDifficulty(channel, diff) {
   say(channel, `Difficulty set to: ${diff}`);
 }
 
+// ─── Help data ────────────────────────────────────────────────────────────────
+
+const HELP = {
+  start:      { usage: 'start [vote] [hints] [teams <t1> <t2>]', desc: 'Start a trivia round. Flags are optional and composable.', detail: [
+    'vote          — 30-second topic poll before the game begins',
+    'hints         — auto-hint at 50% timeout; !hint triggers manually; answering after hint = 0 pts',
+    'teams t1 t2   — team game; players join with !join <team>; winning team announced at end',
+    'Example: !start vote hints teams red blue',
+  ]},
+  stop:       { usage: 'stop', desc: 'Stop the running game and show final scores.' },
+  skip:       { usage: 'skip', desc: 'Skip the current question (owner only). Reveals the answer.' },
+  scores:     { usage: 'scores', desc: 'Show scores for the current game session.' },
+  leaderboard:{ usage: 'leaderboard  (alias: lb)', desc: 'Show the all-time top-10 leaderboard for this channel.' },
+  lb:         { alias: 'leaderboard' },
+  mystats:    { usage: 'mystats', desc: 'Your personal stats: rank, all-time points, correct answers, favourite topic.' },
+  vote:       { usage: 'vote <topic>', desc: 'Cast your vote during a !start vote poll. Must match a configured topic.' },
+  join:       { usage: 'join <team>', desc: 'Join a team during a team game. You can switch teams at any time.' },
+  hint:       { usage: 'hint', desc: 'Reveal one letter of the answer (hints mode only). Answering after = 0 pts.' },
+  teamscores: { usage: 'teamscores', desc: 'Show live team scores during a team game.' },
+  topic:      { usage: 'topic <text>', desc: 'Set the topic for the next game. Persisted. Follows start permission.' },
+  difficulty: { usage: 'difficulty <easy|medium|hard>  (alias: diff)', desc: 'Set question difficulty. Persisted. Follows start permission.' },
+  diff:       { alias: 'difficulty' },
+  language:   { usage: 'language <English|French|...>  (alias: lang)', desc: 'Set question language. Persisted. Follows start permission.' },
+  lang:       { alias: 'language' },
+  topics:     { usage: 'topics', desc: 'List all configured topics available for voting or !topic.' },
+  settings:   { usage: 'settings', desc: 'Show current channel settings: topic, difficulty, language, QPR, timeout.' },
+  ping:       { usage: 'ping', desc: 'Check if the bot is alive. Replies Pong! <nick>.' },
+  uptime:     { usage: 'uptime', desc: 'Show how long the bot has been running since last start.' },
+  version:    { usage: 'version', desc: 'Show the bot version string.' },
+  about:      { usage: 'about  (alias: info)', desc: 'Brief bot description and compact command list.' },
+  info:       { alias: 'about' },
+  say:        { usage: 'say <text>', desc: 'Make the bot say something in the channel. Owner only.' },
+  nick:       { usage: 'nick <newnick>', desc: "Change the bot's IRC nick. Owner only." },
+  quit:       { usage: 'quit [message]', desc: 'Disconnect the bot from IRC. Owner only.' },
+  help:       { usage: 'help [command]', desc: 'Show command list, or detailed help for a specific command. Always sent via PM.' },
+};
+
+function sendHelp(client, nick, channel, args, owner) {
+  const p = PREFIX();
+  const reply = t => client.say(nick, t);
+
+  if (args.length) {
+    const key = args[0].toLowerCase().replace(/^[!]/, '');
+    const entry = HELP[key];
+    if (!entry) { reply(`Unknown command: ${key}. Try ${p}help for the full list.`); return; }
+    const resolved = entry.alias ? HELP[entry.alias] : entry;
+    reply(`Usage: ${p}${resolved.usage}`);
+    reply(resolved.desc);
+    if (resolved.detail) resolved.detail.forEach(line => reply(`  ${line}`));
+    return;
+  }
+
+  reply(`─── Game ───  ${p}start [vote] [hints] [teams t1 t2]  ${p}stop  ${p}skip  ${p}scores  ${p}lb  ${p}mystats`);
+  reply(`─── Game ───  ${p}vote <topic>  ${p}join <team>  ${p}hint  ${p}teamscores`);
+  reply(`─── Setup ──  ${p}topics  ${p}settings${owner ? `  ${p}topic <t>  ${p}diff <e|m|h>  ${p}lang <l>` : ''}`);
+  reply(`─── Bot ────  ${p}ping  ${p}uptime  ${p}version  ${p}about${owner ? `  ${p}say  ${p}nick  ${p}quit` : ''}`);
+  reply(`Type ${p}help <command> for detailed help on any command.`);
+  if (channel) reply(`(Replies are always sent privately. Game output appears in ${channel}.)`);
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 export async function handleMessage(client, channel, nick, host, text) {
@@ -425,8 +485,7 @@ export async function handleMessage(client, channel, nick, host, text) {
 
     // ── Help ──────────────────────────────────────────────────────────────────
     case 'help':
-      say(channel, `${PREFIX()}start [vote] [hints] [teams t1 t2]  ${PREFIX()}stop  ${PREFIX()}skip  ${PREFIX()}scores  ${PREFIX()}lb  ${PREFIX()}mystats  ${PREFIX()}vote <topic>  ${PREFIX()}join <team>  ${PREFIX()}hint  ${PREFIX()}teamscores  ${PREFIX()}topics  ${PREFIX()}settings  ${PREFIX()}ping  ${PREFIX()}uptime  ${PREFIX()}about` +
-        (owner ? `  [owner: ${PREFIX()}topic  ${PREFIX()}diff  ${PREFIX()}lang  ${PREFIX()}say  ${PREFIX()}nick  ${PREFIX()}quit]` : ''));
+      sendHelp(client, nick, channel, args, owner);
       break;
   }
 }
