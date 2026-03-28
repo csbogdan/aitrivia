@@ -107,7 +107,7 @@ async function generateBatch(topic, difficulty, language, count, asked = []) {
   }));
 }
 
-import { fetchQuestions, storeQuestions, countQuestions, countAllQuestions } from './db.js';
+import { fetchQuestions, storeQuestions, countQuestions, countAllQuestions, countQuestionDuplicates, pruneQuestionDuplicates } from './db.js';
 
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -373,8 +373,24 @@ export function handleOwnerPrivmsg(client, nick, host, text) {
       client.say(nick, `Uptime: ${uptimeStr()}  |  ${games.join('  |  ') || 'No channels'}`);
       break;
     }
+    case 'dupes': {
+      const count = countQuestionDuplicates();
+      const total = countAllQuestions();
+      client.say(nick, count
+        ? `Found ${count} duplicate question(s) out of ${total} total. Use ${PREFIX()}dedup to remove them.`
+        : `No duplicates found (${total} questions total).`);
+      break;
+    }
+    case 'dedup': {
+      const removed = pruneQuestionDuplicates();
+      const total = countAllQuestions();
+      client.say(nick, removed
+        ? `Removed ${removed} duplicate question(s). ${total} questions remaining.`
+        : `No duplicates found. ${total} questions total.`);
+      break;
+    }
     case 'help':
-      client.say(nick, `Owner DM commands: ${PREFIX()}join <#ch>  ${PREFIX()}part <#ch>  ${PREFIX()}say <#ch> <text>  ${PREFIX()}nick <newnick>  ${PREFIX()}quit [msg]  ${PREFIX()}channels  ${PREFIX()}status  ${PREFIX()}startperm <#ch> <owner|anyone>  ${PREFIX()}stopperm <#ch> <owner|anyone>`);
+      client.say(nick, `Owner DM commands: ${PREFIX()}join <#ch>  ${PREFIX()}part <#ch>  ${PREFIX()}say <#ch> <text>  ${PREFIX()}nick <newnick>  ${PREFIX()}quit [msg]  ${PREFIX()}channels  ${PREFIX()}status  ${PREFIX()}startperm <#ch> <owner|anyone>  ${PREFIX()}stopperm <#ch> <owner|anyone>  ${PREFIX()}dupes  ${PREFIX()}dedup`);
       break;
   }
 }

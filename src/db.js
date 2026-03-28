@@ -55,8 +55,15 @@ export function saveChannelSetting(channel, key, value) {
 
 // ─── Question cache ───────────────────────────────────────────────────────────
 
+export function countQuestionDuplicates() {
+  const { n } = db.prepare(`
+    SELECT COUNT(*) - COUNT(DISTINCT topic || '|' || difficulty || '|' || language || '|' || lower(question)) as n
+    FROM question_cache
+  `).get();
+  return n;
+}
+
 export function pruneQuestionDuplicates() {
-  // Remove dupes keeping the earliest id, then enforce unique index going forward
   const { changes } = db.prepare(`
     DELETE FROM question_cache
     WHERE id NOT IN (
@@ -67,6 +74,7 @@ export function pruneQuestionDuplicates() {
   if (changes) console.log(`[cache] pruned ${changes} duplicate question(s)`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_qcache_unique ON question_cache(topic, difficulty, language, lower(question))`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_qcache_lru ON question_cache(topic, difficulty, language, used_at)`);
+  return changes;
 }
 
 // Returns how many questions are stored for this topic/difficulty/language
