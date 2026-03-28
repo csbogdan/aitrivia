@@ -124,6 +124,8 @@ npm run dev
 | `!topic <text>` | Change the topic (persisted) |
 | `!difficulty <easy\|medium\|hard>` | Change difficulty (persisted) |
 | `!language <lang>` | Change question language (persisted) |
+
+> `!topic`, `!difficulty`, and `!language` follow the same permission as `!start` — if `startperm` is set to `anyone`, these commands are open to all users too.
 | `!say <text>` | Make the bot say something |
 | `!nick <newnick>` | Change the bot's nick |
 | `!quit [message]` | Disconnect from IRC |
