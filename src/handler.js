@@ -245,19 +245,19 @@ export async function handleMessage(client, channel, nick, host, text) {
     case 'leaderboard':
     case 'lb':         showLeaderboard(channel); break;
     case 'topic':
-      if (!owner) return;
+      if (getStartPerm(channel) === 'owner' && !owner) return;
       if (!args.length) { say(channel, `Usage: ${PREFIX()}topic <topic>`); return; }
       setTopic(channel, args.join(' '));
       break;
     case 'difficulty':
     case 'diff':
-      if (!owner) return;
+      if (getStartPerm(channel) === 'owner' && !owner) return;
       if (!args.length) { say(channel, `Usage: ${PREFIX()}difficulty <easy|medium|hard>`); return; }
       setDifficulty(channel, args[0].toLowerCase());
       break;
     case 'language':
     case 'lang':
-      if (!owner) return;
+      if (getStartPerm(channel) === 'owner' && !owner) return;
       if (!args.length) { say(channel, `Usage: ${PREFIX()}language <English|French|...>`); return; }
       setLanguage(channel, args.join(' '));
       break;
