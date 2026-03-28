@@ -164,15 +164,17 @@ export async function startGame(channel, opts = {}) {
 
   try {
     const cap = cfg().game?.question_cache_limit || 10000;
-    const stored = countQuestions(s.topic, s.difficulty, s.language);
-    const needed = QPR() - Math.min(stored, QPR());
-    if (needed > 0 && countAllQuestions() < cap) {
-      const existing = fetchQuestions(s.topic, s.difficulty, s.language, stored).map(q => q.question);
-      const fresh = await generateBatch(s.topic, s.difficulty, s.language, needed, existing);
+    if (countAllQuestions() < cap) {
+      // Always generate fresh questions; pass last 60 so AI avoids repeats
+      const recent = fetchQuestions(s.topic, s.difficulty, s.language, 60).map(q => q.question);
+      const fresh = await generateBatch(s.topic, s.difficulty, s.language, QPR(), recent);
       storeQuestions(s.topic, s.difficulty, s.language, fresh, cap);
+      s.queue = shuffle(fresh);
+    } else {
+      // Bank full — rotate from DB (least-recently-used)
+      s.queue = shuffle(fetchQuestions(s.topic, s.difficulty, s.language, QPR()));
     }
-    s.queue = shuffle(fetchQuestions(s.topic, s.difficulty, s.language, QPR()));
-    if (!s.queue.length) throw new Error('No questions available — try a different topic or wait for the cache to build.');
+    if (!s.queue.length) throw new Error('No questions available — try a different topic.');
   } catch (err) {
     say(channel, `Failed to load questions: ${err.message}`);
     return;
