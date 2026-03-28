@@ -107,7 +107,7 @@ async function generateBatch(topic, difficulty, language, count, asked = []) {
   }));
 }
 
-import { fetchQuestions, storeQuestions, countQuestions, countAllQuestions, countQuestionDuplicates, pruneQuestionDuplicates } from './db.js';
+import { fetchQuestions, storeQuestions, countQuestions, countAllQuestions, countQuestionDuplicates, pruneQuestionDuplicates, listQuestionCounts, clearQuestions } from './db.js';
 
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -373,6 +373,33 @@ export function handleOwnerPrivmsg(client, nick, host, text) {
       client.say(nick, `Uptime: ${uptimeStr()}  |  ${games.join('  |  ') || 'No channels'}`);
       break;
     }
+    case 'qlist': {
+      const rows = listQuestionCounts();
+      if (!rows.length) { client.say(nick, 'Question bank is empty.'); return; }
+      const total = countAllQuestions();
+      const cap   = cfg().game?.question_cache_limit || 10000;
+      // Send one line per row; IRC-safe since each is short
+      for (const r of rows) {
+        client.say(nick, `  ${r.topic} | ${r.difficulty} | ${r.language} — ${r.count} questions`);
+      }
+      client.say(nick, `Total: ${total}/${cap}`);
+      break;
+    }
+    case 'qclear': {
+      // !qclear <topic> | <difficulty> | <language>   (pipe-separated to allow spaces in topic)
+      const raw = args.join(' ');
+      const parts = raw.split('|').map(s => s.trim());
+      if (parts.length !== 3 || parts.some(p => !p)) {
+        client.say(nick, `Usage: ${PREFIX()}qclear <topic> | <difficulty> | <language>`);
+        return;
+      }
+      const [topic, difficulty, language] = parts;
+      const removed = clearQuestions(topic, difficulty, language);
+      client.say(nick, removed
+        ? `Removed ${removed} question(s) for "${topic} | ${difficulty} | ${language}".`
+        : `No questions found for "${topic} | ${difficulty} | ${language}".`);
+      break;
+    }
     case 'dupes': {
       const count = countQuestionDuplicates();
       const total = countAllQuestions();
@@ -390,7 +417,7 @@ export function handleOwnerPrivmsg(client, nick, host, text) {
       break;
     }
     case 'help':
-      client.say(nick, `Owner DM commands: ${PREFIX()}join <#ch>  ${PREFIX()}part <#ch>  ${PREFIX()}say <#ch> <text>  ${PREFIX()}nick <newnick>  ${PREFIX()}quit [msg]  ${PREFIX()}channels  ${PREFIX()}status  ${PREFIX()}startperm <#ch> <owner|anyone>  ${PREFIX()}stopperm <#ch> <owner|anyone>  ${PREFIX()}dupes  ${PREFIX()}dedup`);
+      client.say(nick, `Owner DM commands: ${PREFIX()}join <#ch>  ${PREFIX()}part <#ch>  ${PREFIX()}say <#ch> <text>  ${PREFIX()}nick <newnick>  ${PREFIX()}quit [msg]  ${PREFIX()}channels  ${PREFIX()}status  ${PREFIX()}startperm <#ch> <owner|anyone>  ${PREFIX()}stopperm <#ch> <owner|anyone>  ${PREFIX()}qlist  ${PREFIX()}qclear <topic>|<diff>|<lang>  ${PREFIX()}dupes  ${PREFIX()}dedup`);
       break;
   }
 }

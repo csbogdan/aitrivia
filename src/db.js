@@ -78,6 +78,22 @@ export function pruneQuestionDuplicates() {
 }
 
 // Returns how many questions are stored for this topic/difficulty/language
+// Returns rows of { topic, difficulty, language, count } sorted by count desc
+export function listQuestionCounts() {
+  return db.prepare(`
+    SELECT topic, difficulty, language, COUNT(*) as count
+    FROM question_cache
+    GROUP BY topic, difficulty, language
+    ORDER BY topic, difficulty, language
+  `).all();
+}
+
+export function clearQuestions(topic, difficulty, language) {
+  return db.prepare(`
+    DELETE FROM question_cache WHERE topic=? AND difficulty=? AND language=?
+  `).run(topic, difficulty, language).changes;
+}
+
 export function countQuestions(topic, difficulty, language) {
   return db.prepare(`SELECT COUNT(*) as n FROM question_cache WHERE topic=? AND difficulty=? AND language=?`)
     .get(topic, difficulty, language).n;

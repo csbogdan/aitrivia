@@ -145,6 +145,8 @@ Send these directly to the bot's nick:
 | `!status` | Uptime + per-channel game state |
 | `!startperm <#channel> <owner\|anyone>` | Set who can `!start` in a channel (persisted) |
 | `!stopperm <#channel> <owner\|anyone>` | Set who can `!stop` in a channel (persisted) |
+| `!qlist` | List question counts grouped by topic / difficulty / language |
+| `!qclear <topic> \| <difficulty> \| <language>` | Delete all questions for a specific combination |
 | `!dupes` | Check how many duplicate questions are in the DB |
 | `!dedup` | Remove duplicate questions from the DB |
 | `!help` | List all PM commands |
