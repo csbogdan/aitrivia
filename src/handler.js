@@ -107,59 +107,7 @@ async function generateBatch(topic, difficulty, language, count, asked = []) {
   }));
 }
 
-// ─── Question Cache ───────────────────────────────────────────────────────────
-// Stored in SQLite so questions persist across restarts
-
-import { getDb } from './db.js';
-
-let cacheReady = false;
-function ensureCacheTable() {
-  if (cacheReady) return;
-  getDb().exec(`
-    CREATE TABLE IF NOT EXISTS question_cache (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      topic TEXT NOT NULL,
-      difficulty TEXT NOT NULL,
-      language TEXT NOT NULL,
-      question TEXT NOT NULL,
-      answer TEXT NOT NULL,
-      variants TEXT NOT NULL,
-      used_at INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_qcache ON question_cache(topic, difficulty, language, used_at);
-  `);
-  cacheReady = true;
-}
-
-const questionCache = {
-  get(topic, difficulty, language, limit) {
-    ensureCacheTable();
-    const rows = getDb().prepare(`
-      SELECT * FROM question_cache
-      WHERE topic=? AND difficulty=? AND language=?
-      ORDER BY used_at ASC
-      LIMIT ?
-    `).all(topic, difficulty, language, limit);
-    // Mark as recently used
-    if (rows.length) {
-      const ids = rows.map(r => r.id).join(',');
-      getDb().exec(`UPDATE question_cache SET used_at=${Date.now()} WHERE id IN (${ids})`);
-    }
-    return rows.map(r => ({ question: r.question, answer: r.answer, variants: JSON.parse(r.variants) }));
-  },
-  store(topic, difficulty, language, questions) {
-    ensureCacheTable();
-    const insert = getDb().prepare(`
-      INSERT OR IGNORE INTO question_cache (topic, difficulty, language, question, answer, variants)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    const tx = getDb().transaction(qs => {
-      for (const q of qs) insert.run(topic, difficulty, language, q.question, q.answer, JSON.stringify(q.variants));
-    });
-    tx(questions);
-    console.log(`[cache] stored ${questions.length} questions (${topic}/${difficulty}/${language})`);
-  },
-};
+import { getRecentQuestions, storeQuestions } from './db.js';
 
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -190,15 +138,11 @@ export async function startGame(channel) {
   s.asked = [];
   say(channel, `Starting trivia! Topic: ${s.topic} | Difficulty: ${s.difficulty} | Language: ${s.language} | ${QPR()} questions — fetching questions...`);
   try {
-    // Load from cache first, fill remainder from AI
-    const cached = questionCache.get(s.topic, s.difficulty, s.language, QPR());
-    const needed = QPR() - cached.length;
-    let fresh = [];
-    if (needed > 0) {
-      fresh = await generateBatch(s.topic, s.difficulty, s.language, needed, cached.map(q => q.question));
-      questionCache.store(s.topic, s.difficulty, s.language, fresh);
-    }
-    s.queue = shuffle([...cached, ...fresh]);
+    // Always generate fresh questions; pass recent DB entries so AI avoids repeats
+    const recent = getRecentQuestions(s.topic, s.difficulty, s.language, 60);
+    const fresh = await generateBatch(s.topic, s.difficulty, s.language, QPR(), recent);
+    storeQuestions(s.topic, s.difficulty, s.language, fresh);
+    s.queue = shuffle(fresh);
   } catch (err) {
     say(channel, `Failed to load questions: ${err.message}`);
     return;

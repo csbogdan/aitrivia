@@ -3,11 +3,12 @@ import config from 'config';
 import IRC from 'irc-framework';
 import { watch } from 'fs';
 import { resolve } from 'path';
-import { initDb } from './src/db.js';
+import { initDb, pruneQuestionDuplicates } from './src/db.js';
 import { initQueue } from './src/sendQueue.js';
 
 // Stateful modules — initialized once, never reloaded
 initDb(config.get('database.path'));
+pruneQuestionDuplicates();
 
 const client = new IRC.Client();
 initQueue(client);

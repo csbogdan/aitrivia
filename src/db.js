@@ -16,6 +16,16 @@ export function initDb(path) {
       value   TEXT NOT NULL,
       PRIMARY KEY (channel, key)
     );
+    CREATE TABLE IF NOT EXISTS question_cache (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic      TEXT NOT NULL,
+      difficulty TEXT NOT NULL,
+      language   TEXT NOT NULL,
+      question   TEXT NOT NULL,
+      answer     TEXT NOT NULL,
+      variants   TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
     CREATE TABLE IF NOT EXISTS scores (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       channel TEXT NOT NULL,
@@ -41,6 +51,50 @@ export function saveChannelSetting(channel, key, value) {
     INSERT INTO channel_settings (channel, key, value) VALUES (?, ?, ?)
     ON CONFLICT(channel, key) DO UPDATE SET value = excluded.value
   `).run(channel, key, String(value));
+}
+
+// ─── Question cache ───────────────────────────────────────────────────────────
+
+const CACHE_LIMIT = 10000;
+
+export function pruneQuestionDuplicates() {
+  // Remove duplicate questions keeping the earliest id, then enforce unique index
+  const { changes } = db.prepare(`
+    DELETE FROM question_cache
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM question_cache
+      GROUP BY topic, difficulty, language, lower(question)
+    )
+  `).run();
+  if (changes) console.log(`[cache] pruned ${changes} duplicate question(s)`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_qcache_unique ON question_cache(topic, difficulty, language, lower(question))`);
+}
+
+export function getRecentQuestions(topic, difficulty, language, limit = 60) {
+  return db.prepare(`
+    SELECT question FROM question_cache
+    WHERE topic=? AND difficulty=? AND language=?
+    ORDER BY id DESC LIMIT ?
+  `).all(topic, difficulty, language, limit).map(r => r.question);
+}
+
+export function storeQuestions(topic, difficulty, language, questions) {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO question_cache (topic, difficulty, language, question, answer, variants)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const tx = db.transaction(qs => {
+    for (const q of qs) insert.run(topic, difficulty, language, q.question, q.answer, JSON.stringify(q.variants));
+  });
+  tx(questions);
+
+  // Prune oldest rows if over limit
+  const { n } = db.prepare('SELECT COUNT(*) as n FROM question_cache').get();
+  if (n > CACHE_LIMIT) {
+    const excess = n - CACHE_LIMIT;
+    db.prepare(`DELETE FROM question_cache WHERE id IN (SELECT id FROM question_cache ORDER BY id ASC LIMIT ?)`).run(excess);
+  }
+  console.log(`[cache] +${questions.length} questions (${topic}/${difficulty}/${language}), total=${Math.min(n, CACHE_LIMIT)}`);
 }
 
 export function addPoint(channel, nick) {
